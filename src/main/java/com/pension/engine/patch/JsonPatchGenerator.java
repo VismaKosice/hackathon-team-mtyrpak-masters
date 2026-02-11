@@ -20,4 +20,11 @@ public class JsonPatchGenerator {
     public static JsonNode generateBackwardPatch(JsonNode before, JsonNode after) {
         return JsonDiff.asJson(after, before, FLAGS);
     }
+
+    public static JsonNode[] generateBothPatches(JsonNode before, JsonNode after) {
+        return new JsonNode[] {
+            JsonDiff.asJson(before, after, FLAGS),
+            JsonDiff.asJson(after, before, FLAGS)
+        };
+    }
 }

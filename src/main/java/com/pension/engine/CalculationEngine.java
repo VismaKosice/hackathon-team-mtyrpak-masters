@@ -12,12 +12,15 @@ import com.pension.engine.mutation.MutationResult;
 import com.pension.engine.patch.JsonPatchGenerator;
 import com.pension.engine.scheme.SchemeRegistryClient;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class CalculationEngine {
 
@@ -34,6 +37,35 @@ public class CalculationEngine {
         this.mapper = mapper;
         this.schemeClient = schemeClient;
         this.patchEnabled = true;
+    }
+
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
+
+    private static String fastUUID() {
+        ThreadLocalRandom r = ThreadLocalRandom.current();
+        long msb = r.nextLong();
+        long lsb = r.nextLong();
+        // Set version 4 and variant bits
+        msb = (msb & 0xFFFFFFFFFFFF0FFFL) | 0x0000000000004000L;
+        lsb = (lsb & 0x3FFFFFFFFFFFFFFFL) | 0x8000000000000000L;
+        char[] buf = new char[36];
+        formatUnsignedLong(msb >> 32, buf, 0, 8);
+        buf[8] = '-';
+        formatUnsignedLong(msb >> 16, buf, 9, 4);
+        buf[13] = '-';
+        formatUnsignedLong(msb, buf, 14, 4);
+        buf[18] = '-';
+        formatUnsignedLong(lsb >> 48, buf, 19, 4);
+        buf[23] = '-';
+        formatUnsignedLong(lsb, buf, 24, 12);
+        return new String(buf);
+    }
+
+    private static void formatUnsignedLong(long val, char[] buf, int offset, int len) {
+        for (int i = offset + len - 1; i >= offset; i--) {
+            buf[i] = HEX[(int)(val & 0xF)];
+            val >>>= 4;
+        }
     }
 
     public CalculationResponse process(CalculationRequest request) {
@@ -82,7 +114,7 @@ public class CalculationEngine {
             MutationResult result = handler.execute(situation, mutation, schemeClient);
 
             if (result.isCritical()) {
-                // CRITICAL: state is NOT modified (handler should not have modified it)
+                // CRITICAL: state is NOT modified - use empty patches (no diff needed)
                 List<CalculationMessage> messages = result.getMessages();
                 List<Integer> messageIndexes = new ArrayList<>(messages.size());
                 for (CalculationMessage msg : messages) {
@@ -92,11 +124,10 @@ public class CalculationEngine {
                 }
                 processed.setCalculationMessageIndexes(messageIndexes);
 
-                // For critical - generate patches showing no change (before == after since state wasn't modified)
-                if (patchEnabled && beforeSnapshot != null) {
-                    JsonNode afterSnapshot = mapper.valueToTree(situation);
-                    processed.setForwardPatch(JsonPatchGenerator.generateForwardPatch(beforeSnapshot, afterSnapshot));
-                    processed.setBackwardPatch(JsonPatchGenerator.generateBackwardPatch(beforeSnapshot, afterSnapshot));
+                if (patchEnabled) {
+                    ArrayNode emptyPatch = mapper.createArrayNode();
+                    processed.setForwardPatch(emptyPatch);
+                    processed.setBackwardPatch(emptyPatch);
                 }
 
                 processedMutations.add(processed);
@@ -121,8 +152,9 @@ public class CalculationEngine {
             // Generate JSON Patch
             if (patchEnabled && beforeSnapshot != null) {
                 JsonNode afterSnapshot = mapper.valueToTree(situation);
-                processed.setForwardPatch(JsonPatchGenerator.generateForwardPatch(beforeSnapshot, afterSnapshot));
-                processed.setBackwardPatch(JsonPatchGenerator.generateBackwardPatch(beforeSnapshot, afterSnapshot));
+                JsonNode[] patches = JsonPatchGenerator.generateBothPatches(beforeSnapshot, afterSnapshot);
+                processed.setForwardPatch(patches[0]);
+                processed.setBackwardPatch(patches[1]);
             }
 
             processedMutations.add(processed);
@@ -154,11 +186,12 @@ public class CalculationEngine {
         calcResult.setInitialSituation(initialSituation);
 
         // Build metadata
-        Instant completedAt = Instant.now();
-        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+        long durationNanos = System.nanoTime() - startNanos;
+        long durationMs = durationNanos / 1_000_000;
+        Instant completedAt = startedAt.plusNanos(durationNanos);
 
         CalculationMetadata metadata = new CalculationMetadata();
-        metadata.setCalculationId(UUID.randomUUID().toString());
+        metadata.setCalculationId(fastUUID());
         metadata.setTenantId(request.getTenantId());
         metadata.setCalculationStartedAt(ISO_FORMATTER.format(startedAt));
         metadata.setCalculationCompletedAt(ISO_FORMATTER.format(completedAt));

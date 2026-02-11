@@ -10,7 +10,6 @@ import com.pension.engine.model.state.Situation;
 import com.pension.engine.scheme.SchemeRegistryClient;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -66,13 +65,13 @@ public class ProjectFutureBenefitsHandler implements MutationHandler {
         LocalDate startDate = LocalDate.parse(startDateStr);
         LocalDate endDate = LocalDate.parse(endDateStr);
 
-        // Pre-parse employment start dates and compute effective salaries
-        LocalDate[] empStarts = new LocalDate[policyCount];
+        // Pre-parse employment start dates as epoch days and compute effective salaries
+        long[] empStartDays = new long[policyCount];
         double[] effectiveSalaries = new double[policyCount];
         double[] accrualRateArr = new double[policyCount];
         for (int i = 0; i < policyCount; i++) {
             Policy policy = policies.get(i);
-            empStarts[i] = LocalDate.parse(policy.getEmploymentStartDate());
+            empStartDays[i] = LocalDate.parse(policy.getEmploymentStartDate()).toEpochDay();
             effectiveSalaries[i] = policy.getSalary() * policy.getPartTimeFactor();
             if (accrualRates != null) {
                 accrualRateArr[i] = accrualRates.getOrDefault(policy.getSchemeId(), 0.02);
@@ -81,12 +80,11 @@ public class ProjectFutureBenefitsHandler implements MutationHandler {
             }
         }
 
-        // Build list of projection dates
-        List<LocalDate> projectionDates = new ArrayList<>();
+        // Count projection dates first to pre-allocate
+        int dateCount = 0;
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusMonths(intervalMonths)) {
-            projectionDates.add(d);
+            dateCount++;
         }
-        int dateCount = projectionDates.size();
 
         // Initialize projections for each policy
         List<List<Projection>> allProjections = new ArrayList<>(policyCount);
@@ -94,17 +92,21 @@ public class ProjectFutureBenefitsHandler implements MutationHandler {
             allProjections.add(new ArrayList<>(dateCount));
         }
 
+        // Reuse arrays across projection dates
+        double[] years = new double[policyCount];
+
         // For each projection date, calculate pension using the same formula as retirement
-        for (int d = 0; d < dateCount; d++) {
-            LocalDate projDate = projectionDates.get(d);
-            double[] years = new double[policyCount];
+        for (LocalDate projDate = startDate; !projDate.isAfter(endDate); projDate = projDate.plusMonths(intervalMonths)) {
+            long projDayEpoch = projDate.toEpochDay();
             double totalYears = 0;
             double weightedSum = 0;
 
             for (int i = 0; i < policyCount; i++) {
-                if (!projDate.isBefore(empStarts[i])) {
-                    long days = ChronoUnit.DAYS.between(empStarts[i], projDate);
-                    years[i] = days / 365.25;
+                long daysDiff = projDayEpoch - empStartDays[i];
+                if (daysDiff >= 0) {
+                    years[i] = daysDiff / 365.25;
+                } else {
+                    years[i] = 0;
                 }
                 totalYears += years[i];
                 weightedSum += effectiveSalaries[i] * years[i];

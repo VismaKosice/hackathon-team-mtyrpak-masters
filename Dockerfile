@@ -12,11 +12,13 @@ COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
 EXPOSE 8080
 CMD ["java", \
      "-XX:+UseG1GC", \
-     "-Xms512m", "-Xmx2g", \
+     "-Xms1g", "-Xmx1g", \
      "-XX:+UnlockExperimentalVMOptions", \
      "-XX:G1NewSizePercent=60", \
      "-XX:G1MaxNewSizePercent=75", \
-     "-XX:MaxGCPauseMillis=5", \
+     "-XX:MaxGCPauseMillis=10", \
      "-XX:+AlwaysPreTouch", \
-     "-XX:+UseStringDeduplication", \
+     "-XX:+ParallelRefProcEnabled", \
+     "-XX:CompileThreshold=500", \
+     "-XX:CICompilerCount=2", \
      "-jar", "/app/app.jar"]

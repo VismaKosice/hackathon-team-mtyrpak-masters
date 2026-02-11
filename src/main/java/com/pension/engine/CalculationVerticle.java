@@ -62,8 +62,8 @@ public class CalculationVerticle extends AbstractVerticle {
     private void handleCalculation(RoutingContext ctx) {
         ctx.request().body().onSuccess(buffer -> {
             try {
-                byte[] bytes = buffer.getBytes();
-                CalculationRequest request = mapper.readValue(bytes, CalculationRequest.class);
+                CalculationRequest request = mapper.readValue(
+                        buffer.getBytes(), 0, buffer.length(), CalculationRequest.class);
 
                 // Basic request validation
                 if (request.getTenantId() == null || request.getTenantId().isEmpty()) {

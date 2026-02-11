@@ -10,7 +10,6 @@ import com.pension.engine.model.state.Situation;
 import com.pension.engine.scheme.SchemeRegistryClient;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +34,7 @@ public class CalculateRetirementBenefitHandler implements MutationHandler {
         }
 
         String retirementDateStr = props.path("retirement_date").asText();
-        LocalDate retirementDate = LocalDate.parse(retirementDateStr);
+        long retirementEpochDay = LocalDate.parse(retirementDateStr).toEpochDay();
 
         int policyCount = policies.size();
         double[] years = new double[policyCount];
@@ -46,17 +45,17 @@ public class CalculateRetirementBenefitHandler implements MutationHandler {
         // Single pass: calculate years of service, effective salaries, and warnings
         for (int i = 0; i < policyCount; i++) {
             Policy policy = policies.get(i);
-            LocalDate empStart = LocalDate.parse(policy.getEmploymentStartDate());
+            long empStartDay = LocalDate.parse(policy.getEmploymentStartDate()).toEpochDay();
+            long daysDiff = retirementEpochDay - empStartDay;
 
-            if (retirementDate.isBefore(empStart)) {
+            if (daysDiff < 0) {
                 years[i] = 0;
                 if (warnings == null) warnings = new ArrayList<>(2);
                 warnings.add(new CalculationMessage(
                         "WARNING", "RETIREMENT_BEFORE_EMPLOYMENT",
                         "Retirement date is before employment start date for policy " + policy.getPolicyId()));
             } else {
-                long days = ChronoUnit.DAYS.between(empStart, retirementDate);
-                years[i] = days / 365.25;
+                years[i] = daysDiff / 365.25;
             }
 
             effectiveSalaries[i] = policy.getSalary() * policy.getPartTimeFactor();
@@ -65,8 +64,8 @@ public class CalculateRetirementBenefitHandler implements MutationHandler {
 
         // Eligibility check: age >= 65 OR total years >= 40
         Person participant = dossier.getPersons().get(0);
-        LocalDate birthDate = LocalDate.parse(participant.getBirthDate());
-        long ageDays = ChronoUnit.DAYS.between(birthDate, retirementDate);
+        long birthEpochDay = LocalDate.parse(participant.getBirthDate()).toEpochDay();
+        long ageDays = retirementEpochDay - birthEpochDay;
         double age = ageDays / 365.25;
 
         if (age < 65 && totalYears < 40) {

@@ -7,7 +7,7 @@ public class Main {
 
     public static void main(String[] args) {
         VertxOptions options = new VertxOptions()
-                .setEventLoopPoolSize(2)
+                .setEventLoopPoolSize(Math.max(2, Runtime.getRuntime().availableProcessors()))
                 .setPreferNativeTransport(true);
 
         Vertx vertx = Vertx.vertx(options);
