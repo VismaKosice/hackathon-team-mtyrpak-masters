@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 COPY gradle/ gradle/
 COPY gradlew build.gradle.kts settings.gradle.kts ./
@@ -16,5 +16,5 @@ CMD ["java", \
      "-XX:+AlwaysPreTouch", \
      "-XX:+ParallelRefProcEnabled", \
      "-XX:CompileThreshold=500", \
-     "-XX:CICompilerCount=1", \
+     "-XX:CICompilerCount=2", \
      "-jar", "/app/app.jar"]
