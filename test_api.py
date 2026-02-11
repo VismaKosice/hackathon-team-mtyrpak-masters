@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test script for Pension Calculation Engine - REST API."""
+"""Test script for Pension Calculation Engine - REST and gRPC."""
 
 import requests
 import json
@@ -11,12 +11,14 @@ import statistics
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE_URL = "http://localhost:8080"
+GRPC_HOST = "localhost"
+GRPC_PORT = 9090
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def pp(data):
     print(json.dumps(data, indent=2))
 
-# ── Transport ──
+# ── Transport abstractions ──
 
 def rest_send(request_dict):
     """Send via REST, return (data_dict, elapsed_ms)."""
@@ -24,6 +26,79 @@ def rest_send(request_dict):
     resp = requests.post(f"{BASE_URL}/calculation-requests", json=request_dict)
     elapsed_ms = (time.perf_counter() - start) * 1000
     return resp.json(), elapsed_ms
+
+_grpc_modules = {}
+
+def init_grpc():
+    """Compile proto and initialize gRPC channel + stub."""
+    global _grpc_modules
+    if _grpc_modules:
+        return _grpc_modules
+
+    try:
+        import grpc
+        from grpc_tools import protoc
+    except ImportError:
+        print("ERROR: grpcio and grpcio-tools required for gRPC mode.")
+        print("  pip install grpcio grpcio-tools")
+        sys.exit(1)
+
+    out_dir = os.path.join(SCRIPT_DIR, '_generated')
+    os.makedirs(out_dir, exist_ok=True)
+
+    proto_dir = os.path.join(SCRIPT_DIR, 'src', 'main', 'proto')
+
+    init_file = os.path.join(out_dir, '__init__.py')
+    if not os.path.exists(init_file):
+        open(init_file, 'w').close()
+
+    # Include well-known types from grpc_tools package
+    import grpc_tools
+    well_known = os.path.join(os.path.dirname(grpc_tools.__file__), '_proto')
+
+    result = protoc.main([
+        'grpc_tools.protoc',
+        f'-I{proto_dir}',
+        f'-I{well_known}',
+        f'--python_out={out_dir}',
+        f'--grpc_python_out={out_dir}',
+        os.path.join(proto_dir, 'pension.proto'),
+    ])
+
+    if result != 0:
+        print(f"ERROR: protoc compilation failed (code {result})")
+        sys.exit(1)
+
+    sys.path.insert(0, out_dir)
+    import pension_pb2
+    import pension_pb2_grpc
+
+    channel = grpc.insecure_channel(f'{GRPC_HOST}:{GRPC_PORT}')
+    stub = pension_pb2_grpc.PensionCalculationServiceStub(channel)
+
+    _grpc_modules = {
+        'pb2': pension_pb2,
+        'pb2_grpc': pension_pb2_grpc,
+        'channel': channel,
+        'stub': stub,
+    }
+    print(f"gRPC stubs compiled, channel to {GRPC_HOST}:{GRPC_PORT}")
+    return _grpc_modules
+
+def grpc_send(request_dict):
+    """Send via gRPC, return (data_dict, elapsed_ms)."""
+    from google.protobuf import json_format
+    mods = init_grpc()
+    proto_req = json_format.ParseDict(request_dict, mods['pb2'].CalculationRequest())
+    start = time.perf_counter()
+    proto_resp = mods['stub'].Calculate(proto_req)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    data = json_format.MessageToDict(
+        proto_resp,
+        preserving_proto_field_name=True,
+        always_print_fields_with_no_presence=True,
+    )
+    return data, elapsed_ms
 
 # ── Test functions ──
 
@@ -425,18 +500,18 @@ ALL_TESTS = [
 
 # ── Runners ──
 
-def run_test_verbose(test_fn, send):
+def run_test_verbose(test_fn, send, transport_label):
     """Run a test with verbose output."""
     name = test_fn.__doc__ or test_fn.__name__
     try:
         ok, elapsed_ms, checks = test_fn(send)
-        print(f"  {name}: {elapsed_ms:.2f}ms")
+        print(f"  [{transport_label}] {name}: {elapsed_ms:.2f}ms")
         for check_name, passed in checks:
             status = "PASS" if passed else "FAIL"
             print(f"    [{status}] {check_name}")
         return ok, elapsed_ms
     except Exception as e:
-        print(f"  {name}: ERROR - {e}")
+        print(f"  [{transport_label}] {name}: ERROR - {e}")
         return False, None
 
 
@@ -450,7 +525,7 @@ def run_test_silent(test_fn, send):
         return (name, False, None, str(e))
 
 
-def run_suite(tests, send, iterations, max_parallel):
+def run_suite(tests, send, iterations, max_parallel, transport_label):
     """Run test suite, return {test_name: [elapsed_ms, ...]} and (passed, failed) counts."""
     all_timings = {(t.__doc__ or t.__name__): [] for t in tests}
     total_passed = 0
@@ -476,10 +551,10 @@ def run_suite(tests, send, iterations, max_parallel):
     return all_timings, total_passed, total_failed, wall_elapsed
 
 
-def print_stats(all_timings, total_passed, total_failed, wall_elapsed, iterations, num_tests):
-    """Print statistics."""
+def print_stats(label, all_timings, total_passed, total_failed, wall_elapsed, iterations, num_tests):
+    """Print statistics for a single transport."""
     print(f"\n{'=' * 70}")
-    print(f"  REST: {total_passed} passed, {total_failed} failed "
+    print(f"  {label}: {total_passed} passed, {total_failed} failed "
           f"({iterations}x{num_tests} = {iterations * num_tests} requests)")
     print(f"{'=' * 70}")
 
@@ -519,33 +594,142 @@ def print_stats(all_timings, total_passed, total_failed, wall_elapsed, iteration
             print(f"  Throughput: {len(all_times) / (wall_elapsed / 1000):.0f} req/s")
 
 
+def print_comparison(rest_timings, grpc_timings, iterations):
+    """Print side-by-side comparison table."""
+    print(f"\n{'=' * 90}")
+    print("  REST vs gRPC COMPARISON")
+    print(f"{'=' * 90}")
+
+    if iterations == 1:
+        print(f"  {'Test':<32} {'REST':>10} {'gRPC':>10} {'Speedup':>10}")
+        print(f"  {'-'*32} {'-'*10} {'-'*10} {'-'*10}")
+        rest_total = 0
+        grpc_total = 0
+        for name in rest_timings:
+            rt = rest_timings[name][0] if rest_timings.get(name) else None
+            gt = grpc_timings[name][0] if grpc_timings.get(name) else None
+            r_str = f"{rt:.2f}ms" if rt else "ERROR"
+            g_str = f"{gt:.2f}ms" if gt else "ERROR"
+            if rt and gt:
+                speedup = rt / gt
+                s_str = f"{speedup:.2f}x"
+                rest_total += rt
+                grpc_total += gt
+            else:
+                s_str = "N/A"
+            print(f"  {name:<32} {r_str:>10} {g_str:>10} {s_str:>10}")
+        print(f"  {'-'*32} {'-'*10} {'-'*10} {'-'*10}")
+        if rest_total and grpc_total:
+            speedup = rest_total / grpc_total
+            print(f"  {'Average':<32} {rest_total/len(rest_timings):>8.2f}ms {grpc_total/len(grpc_timings):>8.2f}ms {speedup:>8.2f}x")
+    else:
+        print(f"  {'Test':<28} {'REST Avg':>10} {'gRPC Avg':>10} {'REST P50':>10} {'gRPC P50':>10} {'Speedup':>10}")
+        print(f"  {'-'*28} {'-'*10} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+        all_rest = []
+        all_grpc = []
+        for name in rest_timings:
+            rt = rest_timings.get(name, [])
+            gt = grpc_timings.get(name, [])
+            if rt and gt:
+                r_avg = statistics.mean(rt)
+                g_avg = statistics.mean(gt)
+                r_p50 = statistics.median(rt)
+                g_p50 = statistics.median(gt)
+                speedup = r_avg / g_avg if g_avg > 0 else float('inf')
+                all_rest.extend(rt)
+                all_grpc.extend(gt)
+                print(f"  {name:<28} {r_avg:>8.2f}ms {g_avg:>8.2f}ms {r_p50:>8.2f}ms {g_p50:>8.2f}ms {speedup:>8.2f}x")
+            else:
+                print(f"  {name:<28} {'ERROR':>10} {'ERROR':>10}")
+        print(f"  {'-'*28} {'-'*10} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+        if all_rest and all_grpc:
+            r_avg = statistics.mean(all_rest)
+            g_avg = statistics.mean(all_grpc)
+            r_p50 = statistics.median(all_rest)
+            g_p50 = statistics.median(all_grpc)
+            speedup = r_avg / g_avg if g_avg > 0 else float('inf')
+            print(f"  {'Overall':<28} {r_avg:>8.2f}ms {g_avg:>8.2f}ms {r_p50:>8.2f}ms {g_p50:>8.2f}ms {speedup:>8.2f}x")
+
+
 # ── Main ──
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Pension Calculation Engine API")
     parser.add_argument("-n", "--iterations", type=int, default=1, help="Number of iterations (default: 1)")
     parser.add_argument("-p", "--parallel", type=int, default=20, help="Max parallel requests (default: 20)")
+    parser.add_argument("--mode", choices=["rest", "grpc", "both"], default="both",
+                        help="Transport mode (default: both)")
     args = parser.parse_args()
 
     iterations = args.iterations
     max_parallel = args.parallel
+    mode = args.mode
     tests = ALL_TESTS
     num_tests = len(tests)
 
-    if iterations == 1:
-        print(f"\nRunning {num_tests} tests via REST...\n")
+    any_failed = False
+
+    # Single-iteration verbose mode
+    if iterations == 1 and mode != "both":
+        send = rest_send if mode == "rest" else grpc_send
+        if mode == "grpc":
+            init_grpc()
+        label = "REST" if mode == "rest" else "gRPC"
+        print(f"\nRunning {num_tests} tests via {label}...\n")
         total_passed = 0
         total_failed = 0
         for t in tests:
-            ok, elapsed_ms = run_test_verbose(t, rest_send)
+            ok, elapsed_ms = run_test_verbose(t, send, label)
             if ok:
                 total_passed += 1
             else:
                 total_failed += 1
         print(f"\n{total_passed} passed, {total_failed} failed")
-        sys.exit(1 if total_failed > 0 else 0)
-    else:
-        print(f"\nREST: {iterations}x{num_tests} requests, {max_parallel} parallel\n")
-        timings, passed, failed, wall = run_suite(tests, rest_send, iterations, max_parallel)
-        print_stats(timings, passed, failed, wall, iterations, num_tests)
-        sys.exit(1 if failed > 0 else 0)
+        any_failed = total_failed > 0
+
+    elif mode == "rest":
+        print(f"\nREST mode: {iterations}x{num_tests} requests, {max_parallel} parallel\n")
+        timings, passed, failed, wall = run_suite(tests, rest_send, iterations, max_parallel, "REST")
+        print_stats("REST", timings, passed, failed, wall, iterations, num_tests)
+        any_failed = failed > 0
+
+    elif mode == "grpc":
+        init_grpc()
+        print(f"\ngRPC mode: {iterations}x{num_tests} requests, {max_parallel} parallel\n")
+        timings, passed, failed, wall = run_suite(tests, grpc_send, iterations, max_parallel, "gRPC")
+        print_stats("gRPC", timings, passed, failed, wall, iterations, num_tests)
+        any_failed = failed > 0
+
+    else:  # both
+        if mode == "both":
+            init_grpc()
+
+        print(f"\nBOTH mode: {iterations}x{num_tests} requests each, {max_parallel} parallel\n")
+
+        # Warmup
+        if iterations > 1:
+            print("Warming up (5 requests each)...")
+            for _ in range(5):
+                for t in tests[:1]:
+                    try:
+                        t(rest_send)
+                    except:
+                        pass
+                    try:
+                        t(grpc_send)
+                    except:
+                        pass
+            print("Warmup done.\n")
+
+        rest_timings, rest_passed, rest_failed, rest_wall = run_suite(
+            tests, rest_send, iterations, max_parallel, "REST")
+        grpc_timings, grpc_passed, grpc_failed, grpc_wall = run_suite(
+            tests, grpc_send, iterations, max_parallel, "gRPC")
+
+        print_stats("REST", rest_timings, rest_passed, rest_failed, rest_wall, iterations, num_tests)
+        print_stats("gRPC", grpc_timings, grpc_passed, grpc_failed, grpc_wall, iterations, num_tests)
+        print_comparison(rest_timings, grpc_timings, iterations)
+
+        any_failed = (rest_failed + grpc_failed) > 0
+
+    sys.exit(1 if any_failed else 0)

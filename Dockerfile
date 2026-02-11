@@ -9,16 +9,12 @@ RUN ./gradlew --no-daemon jar
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
-EXPOSE 8080
+EXPOSE 8080 9090
 CMD ["java", \
-     "-XX:+UseG1GC", \
-     "-Xms1g", "-Xmx1g", \
-     "-XX:+UnlockExperimentalVMOptions", \
-     "-XX:G1NewSizePercent=60", \
-     "-XX:G1MaxNewSizePercent=75", \
-     "-XX:MaxGCPauseMillis=10", \
+     "-XX:+UseParallelGC", \
+     "-Xms4g", "-Xmx4g", \
      "-XX:+AlwaysPreTouch", \
      "-XX:+ParallelRefProcEnabled", \
      "-XX:CompileThreshold=500", \
-     "-XX:CICompilerCount=2", \
+     "-XX:CICompilerCount=1", \
      "-jar", "/app/app.jar"]

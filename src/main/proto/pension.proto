@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package pension;
+
+option java_package = "com.pension.engine.grpc";
+option java_multiple_files = true;
+
+import "google/protobuf/struct.proto";
+
+service PensionCalculationService {
+  rpc Calculate(CalculationRequest) returns (CalculationResponse);
+}
+
+// ── Request messages ──
+
+message CalculationRequest {
+  string tenant_id = 1;
+  CalculationInstructions calculation_instructions = 2;
+}
+
+message CalculationInstructions {
+  repeated Mutation mutations = 1;
+}
+
+message Mutation {
+  string mutation_id = 1;
+  string mutation_definition_name = 2;
+  string mutation_type = 3;
+  string actual_at = 4;
+  optional string dossier_id = 5;
+  google.protobuf.Struct mutation_properties = 6;
+}
+
+// ── Response messages ──
+
+message CalculationResponse {
+  CalculationMetadata calculation_metadata = 1;
+  CalculationResult calculation_result = 2;
+}
+
+message CalculationMetadata {
+  string calculation_id = 1;
+  string tenant_id = 2;
+  string calculation_started_at = 3;
+  string calculation_completed_at = 4;
+  int64 calculation_duration_ms = 5;
+  string calculation_outcome = 6;
+}
+
+message CalculationResult {
+  repeated CalculationMessage messages = 1;
+  repeated ProcessedMutation mutations = 2;
+  SituationSnapshot end_situation = 3;
+  InitialSituation initial_situation = 4;
+}
+
+message CalculationMessage {
+  int32 id = 1;
+  string level = 2;
+  string code = 3;
+  string message = 4;
+}
+
+message ProcessedMutation {
+  Mutation mutation = 1;
+  repeated int32 calculation_message_indexes = 2;
+  google.protobuf.Value forward_patch_to_situation_after_this_mutation = 3;
+  google.protobuf.Value backward_patch_to_previous_situation = 4;
+}
+
+message SituationSnapshot {
+  string mutation_id = 1;
+  int32 mutation_index = 2;
+  string actual_at = 3;
+  Situation situation = 4;
+}
+
+message InitialSituation {
+  string actual_at = 1;
+  Situation situation = 2;
+}
+
+// ── State messages ──
+
+message Situation {
+  optional Dossier dossier = 1;
+}
+
+message Dossier {
+  string dossier_id = 1;
+  string status = 2;
+  optional string retirement_date = 3;
+  repeated Person persons = 4;
+  repeated Policy policies = 5;
+}
+
+message Person {
+  string person_id = 1;
+  string role = 2;
+  string name = 3;
+  string birth_date = 4;
+}
+
+message Policy {
+  string policy_id = 1;
+  string scheme_id = 2;
+  string employment_start_date = 3;
+  double salary = 4;
+  double part_time_factor = 5;
+  optional double attainable_pension = 6;
+  repeated Projection projections = 7;
+}
+
+message Projection {
+  string date = 1;
+  double projected_pension = 2;
+}
