@@ -9,7 +9,7 @@ RUN ./gradlew --no-daemon jar
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
-EXPOSE 8080
+EXPOSE 8080 9090
 CMD ["java", \
      "-XX:+UseG1GC", \
      "-Xms1g", "-Xmx1g", \
