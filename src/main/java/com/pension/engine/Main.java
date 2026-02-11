@@ -37,12 +37,5 @@ public class Main {
                     err.printStackTrace();
                     System.exit(1);
                 });
-
-        vertx.deployVerticle(new GrpcVerticle())
-                .onSuccess(id -> System.out.println("gRPC verticle deployed: " + id))
-                .onFailure(err -> {
-                    System.err.println("Failed to deploy gRPC verticle: " + err.getMessage());
-                    err.printStackTrace();
-                });
     }
 }
