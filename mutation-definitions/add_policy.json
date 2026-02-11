@@ -1,0 +1,35 @@
+{
+  "name": "add_policy",
+  "description": "Adding a new policy to the Dossier.",
+  "mutation_type": "DOSSIER",
+  "json_schema": {
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "title": "add_policy",
+    "type": "object",
+    "properties": {
+      "scheme_id": {
+        "description": "The identifier of the pension scheme for this policy.",
+        "type": "string"
+      },
+      "employment_start_date": {
+        "description": "The start date of the employment linked to this policy.",
+        "type": "string",
+        "format": "date"
+      },
+      "salary": {
+        "description": "The initial full-time annual salary.",
+        "type": "number",
+        "minimum": 0
+      },
+      "part_time_factor": {
+        "description": "The part-time factor for the employment (e.g., 1.0 for full-time, 0.5 for 50% part-time).",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "required": ["scheme_id", "employment_start_date", "salary", "part_time_factor"],
+    "additionalProperties": false
+  }
+}
+
