@@ -12,7 +12,8 @@ COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
 EXPOSE 8080
 CMD ["java", \
      "-XX:+UseG1GC", \
-     "-Xms8g", "-Xmx8g", \
+     "-Xms512m", "-Xmx2g", \
+     "-XX:+UnlockExperimentalVMOptions", \
      "-XX:G1NewSizePercent=60", \
      "-XX:G1MaxNewSizePercent=75", \
      "-XX:MaxGCPauseMillis=5", \
