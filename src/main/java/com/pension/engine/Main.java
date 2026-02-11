@@ -23,6 +23,7 @@ public class Main {
 
         VertxOptions options = new VertxOptions()
                 .setEventLoopPoolSize(cores)
+                .setWorkerPoolSize(cores * 4)
                 .setPreferNativeTransport(true);
 
         Vertx vertx = Vertx.vertx(options);

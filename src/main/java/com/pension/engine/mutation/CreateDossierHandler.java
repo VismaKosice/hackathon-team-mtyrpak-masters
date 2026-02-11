@@ -1,6 +1,9 @@
 package com.pension.engine.mutation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pension.engine.model.request.Mutation;
 import com.pension.engine.model.response.CalculationMessage;
 import com.pension.engine.model.state.Dossier;
@@ -10,13 +13,11 @@ import com.pension.engine.scheme.SchemeRegistryClient;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.List;
 
 public class CreateDossierHandler implements MutationHandler {
 
     @Override
-    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient) {
+    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient, ObjectMapper mapper) {
         JsonNode props = mutation.getMutationProperties();
 
         // Validation
@@ -57,6 +58,19 @@ public class CreateDossierHandler implements MutationHandler {
 
         situation.setDossier(dossier);
 
-        return MutationResult.success();
+        // Build patches: /dossier goes from null to dossier object
+        ArrayNode fwd = mapper.createArrayNode();
+        ObjectNode fwdOp = fwd.addObject();
+        fwdOp.put("op", "replace");
+        fwdOp.put("path", "/dossier");
+        fwdOp.set("value", mapper.valueToTree(dossier));
+
+        ArrayNode bwd = mapper.createArrayNode();
+        ObjectNode bwdOp = bwd.addObject();
+        bwdOp.put("op", "replace");
+        bwdOp.put("path", "/dossier");
+        bwdOp.putNull("value");
+
+        return MutationResult.success().withPatches(fwd, bwd);
     }
 }

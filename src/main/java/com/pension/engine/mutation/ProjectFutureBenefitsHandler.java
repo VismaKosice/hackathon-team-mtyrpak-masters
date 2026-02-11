@@ -1,6 +1,9 @@
 package com.pension.engine.mutation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pension.engine.model.request.Mutation;
 import com.pension.engine.model.response.CalculationMessage;
 import com.pension.engine.model.state.Dossier;
@@ -17,7 +20,7 @@ import java.util.Map;
 public class ProjectFutureBenefitsHandler implements MutationHandler {
 
     @Override
-    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient) {
+    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient, ObjectMapper mapper) {
         JsonNode props = mutation.getMutationProperties();
         Dossier dossier = situation.getDossier();
 
@@ -126,14 +129,32 @@ public class ProjectFutureBenefitsHandler implements MutationHandler {
             }
         }
 
-        // Set projections on policies
+        // Capture old projections and set new ones
+        ArrayNode fwd = mapper.createArrayNode();
+        ArrayNode bwd = mapper.createArrayNode();
+
         for (int i = 0; i < policyCount; i++) {
+            List<Projection> oldProjections = policies.get(i).getProjections();
             policies.get(i).setProjections(allProjections.get(i));
+
+            String path = "/dossier/policies/" + i + "/projections";
+
+            ObjectNode fwdOp = fwd.addObject();
+            fwdOp.put("op", "replace");
+            fwdOp.put("path", path);
+            fwdOp.set("value", mapper.valueToTree(allProjections.get(i)));
+
+            ObjectNode bwdOp = bwd.addObject();
+            bwdOp.put("op", "replace");
+            bwdOp.put("path", path);
+            if (oldProjections != null) {
+                bwdOp.set("value", mapper.valueToTree(oldProjections));
+            } else {
+                bwdOp.putNull("value");
+            }
         }
 
-        if (warnings != null && !warnings.isEmpty()) {
-            return MutationResult.warnings(warnings);
-        }
-        return MutationResult.success();
+        MutationResult result = (warnings != null && !warnings.isEmpty()) ? MutationResult.warnings(warnings) : MutationResult.success();
+        return result.withPatches(fwd, bwd);
     }
 }

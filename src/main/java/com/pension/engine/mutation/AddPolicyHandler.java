@@ -1,6 +1,9 @@
 package com.pension.engine.mutation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pension.engine.model.request.Mutation;
 import com.pension.engine.model.response.CalculationMessage;
 import com.pension.engine.model.state.Dossier;
@@ -14,7 +17,7 @@ import java.util.List;
 public class AddPolicyHandler implements MutationHandler {
 
     @Override
-    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient) {
+    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient, ObjectMapper mapper) {
         JsonNode props = mutation.getMutationProperties();
         Dossier dossier = situation.getDossier();
 
@@ -67,9 +70,21 @@ public class AddPolicyHandler implements MutationHandler {
 
         dossier.getPolicies().add(policy);
 
-        if (warnings != null) {
-            return MutationResult.warnings(warnings);
-        }
-        return MutationResult.success();
+        // Build patches: new policy added at end of array
+        int idx = dossier.getPolicies().size() - 1;
+
+        ArrayNode fwd = mapper.createArrayNode();
+        ObjectNode fwdOp = fwd.addObject();
+        fwdOp.put("op", "add");
+        fwdOp.put("path", "/dossier/policies/" + idx);
+        fwdOp.set("value", mapper.valueToTree(policy));
+
+        ArrayNode bwd = mapper.createArrayNode();
+        ObjectNode bwdOp = bwd.addObject();
+        bwdOp.put("op", "remove");
+        bwdOp.put("path", "/dossier/policies/" + idx);
+
+        MutationResult result = (warnings != null) ? MutationResult.warnings(warnings) : MutationResult.success();
+        return result.withPatches(fwd, bwd);
     }
 }

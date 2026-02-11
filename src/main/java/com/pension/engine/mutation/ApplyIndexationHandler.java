@@ -1,6 +1,9 @@
 package com.pension.engine.mutation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pension.engine.model.request.Mutation;
 import com.pension.engine.model.response.CalculationMessage;
 import com.pension.engine.model.state.Dossier;
@@ -14,7 +17,7 @@ import java.util.List;
 public class ApplyIndexationHandler implements MutationHandler {
 
     @Override
-    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient) {
+    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient, ObjectMapper mapper) {
         JsonNode props = mutation.getMutationProperties();
         Dossier dossier = situation.getDossier();
 
@@ -41,6 +44,9 @@ public class ApplyIndexationHandler implements MutationHandler {
         List<CalculationMessage> warnings = null;
         int matchCount = 0;
 
+        ArrayNode fwd = mapper.createArrayNode();
+        ArrayNode bwd = mapper.createArrayNode();
+
         for (int i = 0; i < policies.size(); i++) {
             Policy policy = policies.get(i);
 
@@ -53,7 +59,8 @@ public class ApplyIndexationHandler implements MutationHandler {
             }
 
             matchCount++;
-            double newSalary = policy.getSalary() * factor;
+            double oldSalary = policy.getSalary();
+            double newSalary = oldSalary * factor;
 
             if (newSalary < 0) {
                 newSalary = 0;
@@ -64,6 +71,18 @@ public class ApplyIndexationHandler implements MutationHandler {
             }
 
             policy.setSalary(newSalary);
+
+            // Patch: replace salary
+            String path = "/dossier/policies/" + i + "/salary";
+            ObjectNode fwdOp = fwd.addObject();
+            fwdOp.put("op", "replace");
+            fwdOp.put("path", path);
+            fwdOp.put("value", newSalary);
+
+            ObjectNode bwdOp = bwd.addObject();
+            bwdOp.put("op", "replace");
+            bwdOp.put("path", path);
+            bwdOp.put("value", oldSalary);
         }
 
         if (hasFilters && matchCount == 0) {
@@ -73,9 +92,7 @@ public class ApplyIndexationHandler implements MutationHandler {
                     "No policies match the specified filter criteria"));
         }
 
-        if (warnings != null) {
-            return MutationResult.warnings(warnings);
-        }
-        return MutationResult.success();
+        MutationResult result = (warnings != null) ? MutationResult.warnings(warnings) : MutationResult.success();
+        return result.withPatches(fwd, bwd);
     }
 }

@@ -1,6 +1,9 @@
 package com.pension.engine.mutation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pension.engine.model.request.Mutation;
 import com.pension.engine.model.response.CalculationMessage;
 import com.pension.engine.model.state.Dossier;
@@ -17,7 +20,7 @@ import java.util.Map;
 public class CalculateRetirementBenefitHandler implements MutationHandler {
 
     @Override
-    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient) {
+    public MutationResult execute(Situation situation, Mutation mutation, SchemeRegistryClient schemeClient, ObjectMapper mapper) {
         JsonNode props = mutation.getMutationProperties();
         Dossier dossier = situation.getDossier();
 
@@ -91,11 +94,17 @@ public class CalculateRetirementBenefitHandler implements MutationHandler {
         }
         double weightedAvg = totalYears > 0 ? weightedSum / totalYears : 0;
 
+        // Capture old values for backward patch
+        String oldStatus = dossier.getStatus();
+        String oldRetirementDate = dossier.getRetirementDate();
+        Double[] oldPensions = new Double[policyCount];
+        for (int i = 0; i < policyCount; i++) {
+            oldPensions[i] = policies.get(i).getAttainablePension();
+        }
+
         // Calculate annual pension using accrual rate (per-scheme if available, else default 0.02)
         double annualPension;
         if (accrualRates != null) {
-            // When using per-scheme accrual rates, we need to calculate per-policy pension directly
-            // Annual pension = Σ(weighted_avg * policy_years * accrual_rate_for_policy_scheme)
             annualPension = 0;
             for (int i = 0; i < policyCount; i++) {
                 double accrualRate = accrualRates.getOrDefault(policies.get(i).getSchemeId(), 0.02);
@@ -130,9 +139,56 @@ public class CalculateRetirementBenefitHandler implements MutationHandler {
         dossier.setStatus("RETIRED");
         dossier.setRetirementDate(retirementDateStr);
 
-        if (warnings != null && !warnings.isEmpty()) {
-            return MutationResult.warnings(warnings);
+        // Build patches
+        ArrayNode fwd = mapper.createArrayNode();
+        ArrayNode bwd = mapper.createArrayNode();
+
+        // Status change
+        ObjectNode fwdStatus = fwd.addObject();
+        fwdStatus.put("op", "replace");
+        fwdStatus.put("path", "/dossier/status");
+        fwdStatus.put("value", "RETIRED");
+
+        ObjectNode bwdStatus = bwd.addObject();
+        bwdStatus.put("op", "replace");
+        bwdStatus.put("path", "/dossier/status");
+        bwdStatus.put("value", oldStatus);
+
+        // Retirement date change
+        ObjectNode fwdRetDate = fwd.addObject();
+        fwdRetDate.put("op", "replace");
+        fwdRetDate.put("path", "/dossier/retirement_date");
+        fwdRetDate.put("value", retirementDateStr);
+
+        ObjectNode bwdRetDate = bwd.addObject();
+        bwdRetDate.put("op", "replace");
+        bwdRetDate.put("path", "/dossier/retirement_date");
+        if (oldRetirementDate != null) {
+            bwdRetDate.put("value", oldRetirementDate);
+        } else {
+            bwdRetDate.putNull("value");
         }
-        return MutationResult.success();
+
+        // Attainable pension per policy
+        for (int i = 0; i < policyCount; i++) {
+            String path = "/dossier/policies/" + i + "/attainable_pension";
+
+            ObjectNode fwdPension = fwd.addObject();
+            fwdPension.put("op", "replace");
+            fwdPension.put("path", path);
+            fwdPension.put("value", policies.get(i).getAttainablePension());
+
+            ObjectNode bwdPension = bwd.addObject();
+            bwdPension.put("op", "replace");
+            bwdPension.put("path", path);
+            if (oldPensions[i] != null) {
+                bwdPension.put("value", oldPensions[i]);
+            } else {
+                bwdPension.putNull("value");
+            }
+        }
+
+        MutationResult result = (warnings != null && !warnings.isEmpty()) ? MutationResult.warnings(warnings) : MutationResult.success();
+        return result.withPatches(fwd, bwd);
     }
 }
