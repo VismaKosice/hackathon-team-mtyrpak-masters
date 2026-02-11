@@ -1,11 +1,22 @@
 package com.pension.engine;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.module.blackbird.BlackbirdModule;
 import com.pension.engine.grpc.GrpcVerticle;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 
 public class Main {
+
+    public static final ObjectMapper MAPPER = new ObjectMapper();
+    static {
+        MAPPER.registerModule(new BlackbirdModule());
+        MAPPER.setSerializationInclusion(JsonInclude.Include.ALWAYS);
+        MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
 
     public static void main(String[] args) {
         int cores = Math.max(2, Runtime.getRuntime().availableProcessors());

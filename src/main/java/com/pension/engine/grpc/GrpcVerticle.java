@@ -1,10 +1,8 @@
 package com.pension.engine.grpc;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.module.blackbird.BlackbirdModule;
 import com.pension.engine.CalculationEngine;
+import com.pension.engine.Main;
 import com.pension.engine.mutation.MutationRegistry;
 import com.pension.engine.scheme.SchemeRegistryClient;
 import io.grpc.Server;
@@ -19,10 +17,7 @@ public class GrpcVerticle extends AbstractVerticle {
     @Override
     public void start(Promise<Void> startPromise) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.registerModule(new BlackbirdModule());
-            mapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
-            mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            ObjectMapper mapper = Main.MAPPER;
 
             MutationRegistry registry = new MutationRegistry();
 
