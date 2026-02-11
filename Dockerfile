@@ -12,7 +12,7 @@ COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
 EXPOSE 8080 9090
 CMD ["java", \
      "-XX:+UseParallelGC", \
-     "-Xms4g", "-Xmx4g", \
+     "-Xms2g", "-Xmx2g", \
      "-XX:+AlwaysPreTouch", \
      "-XX:+ParallelRefProcEnabled", \
      "-XX:CompileThreshold=500", \
