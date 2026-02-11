@@ -14,7 +14,6 @@ obj/
 out/
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
 *.war
 *.exe
 *.dll
