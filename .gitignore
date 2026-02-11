@@ -40,6 +40,9 @@ credentials.json
 results/
 *.log
 
+# Generated gRPC Python stubs
+_generated/
+
 # OS
 .DS_Store
 Thumbs.db
