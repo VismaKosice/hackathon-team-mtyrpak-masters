@@ -86,6 +86,9 @@ public class CalculationEngine {
 
         boolean failed = false;
 
+        // Reuse after-snapshot as next before-snapshot: N+1 calls instead of 2N
+        JsonNode beforeSnapshot = patchEnabled ? mapper.valueToTree(situation) : null;
+
         for (int i = 0; i < mutationCount; i++) {
             Mutation mutation = mutations.get(i);
             MutationHandler handler = registry.getHandler(mutation.getMutationDefinitionName());
@@ -103,12 +106,6 @@ public class CalculationEngine {
                 processedMutations.add(processed);
                 failed = true;
                 break;
-            }
-
-            // Snapshot before for JSON Patch
-            JsonNode beforeSnapshot = null;
-            if (patchEnabled) {
-                beforeSnapshot = mapper.valueToTree(situation);
             }
 
             MutationResult result = handler.execute(situation, mutation, schemeClient);
@@ -149,12 +146,13 @@ public class CalculationEngine {
                 processed.setCalculationMessageIndexes(List.of());
             }
 
-            // Generate JSON Patch
-            if (patchEnabled && beforeSnapshot != null) {
+            // Generate JSON Patch — reuse previous afterSnapshot as this beforeSnapshot
+            if (patchEnabled) {
                 JsonNode afterSnapshot = mapper.valueToTree(situation);
                 JsonNode[] patches = JsonPatchGenerator.generateBothPatches(beforeSnapshot, afterSnapshot);
                 processed.setForwardPatch(patches[0]);
                 processed.setBackwardPatch(patches[1]);
+                beforeSnapshot = afterSnapshot;
             }
 
             processedMutations.add(processed);

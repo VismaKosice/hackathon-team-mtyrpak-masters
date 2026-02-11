@@ -77,12 +77,18 @@ public class CalculationVerticle extends AbstractVerticle {
                     return;
                 }
 
-                CalculationResponse response = engine.process(request);
-                byte[] responseBytes = mapper.writeValueAsBytes(response);
-
-                ctx.response()
-                        .putHeader("Content-Type", "application/json")
-                        .end(io.vertx.core.buffer.Buffer.buffer(responseBytes));
+                // Run on worker thread to avoid blocking event loop
+                // (SchemeRegistryClient.getAccrualRates uses CompletableFuture.get)
+                vertx.<byte[]>executeBlocking(() -> {
+                    CalculationResponse response = engine.process(request);
+                    return mapper.writeValueAsBytes(response);
+                }, false).onSuccess(responseBytes -> {
+                    ctx.response()
+                            .putHeader("Content-Type", "application/json")
+                            .end(io.vertx.core.buffer.Buffer.buffer(responseBytes));
+                }).onFailure(err -> {
+                    sendError(ctx, 500, "Internal server error: " + err.getMessage());
+                });
 
             } catch (Exception e) {
                 sendError(ctx, 500, "Internal server error: " + e.getMessage());

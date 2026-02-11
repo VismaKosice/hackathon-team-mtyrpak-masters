@@ -11,14 +11,10 @@ WORKDIR /app
 COPY --from=build /app/build/libs/pension-engine.jar /app/app.jar
 EXPOSE 8080 9090
 CMD ["java", \
-     "-XX:+UseG1GC", \
+     "-XX:+UseParallelGC", \
      "-Xms1g", "-Xmx1g", \
-     "-XX:+UnlockExperimentalVMOptions", \
-     "-XX:G1NewSizePercent=60", \
-     "-XX:G1MaxNewSizePercent=75", \
-     "-XX:MaxGCPauseMillis=10", \
      "-XX:+AlwaysPreTouch", \
      "-XX:+ParallelRefProcEnabled", \
      "-XX:CompileThreshold=500", \
-     "-XX:CICompilerCount=2", \
+     "-XX:CICompilerCount=1", \
      "-jar", "/app/app.jar"]
